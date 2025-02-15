@@ -93,13 +93,13 @@ func main() {
 		Timeout: 10 * time.Second,
 	}
 
-	statusLog, err := os.OpenFile("status.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	statusLog, err := os.OpenFile("logs/status.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatal("Can not open status.log:", err)
 	}
 	defer statusLog.Close()
 
-	errorLog, err := os.OpenFile("errors.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	errorLog, err := os.OpenFile("logs/errors.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatal("Can not open errors.log:", err)
 	}
