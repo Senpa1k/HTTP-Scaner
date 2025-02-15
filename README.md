@@ -1,5 +1,5 @@
 # HTTP-Scaner
-monitoring the sites availability
+Monitoring the sites availability
 
 
 1. Put your url in ListOfSites.txt
