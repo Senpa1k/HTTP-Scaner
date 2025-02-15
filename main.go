@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -9,9 +10,17 @@ import (
 	"time"
 )
 
+type SiteScanner struct {
+	Client         *http.Client
+	Sites          []string
+	StatusLog      *os.File
+	ErrorLog       *os.File
+	LogMutex       sync.Mutex
+	AmountAttempts int8
+}
+
 func clean(arr []string) []string {
 	newArr := []string{}
-
 	for _, str := range arr {
 		if len(str) > 2 {
 			newArr = append(newArr, str)
@@ -20,63 +29,94 @@ func clean(arr []string) []string {
 	return newArr
 }
 
-func getClientResponse(url string, c *http.Client, wg *sync.WaitGroup) {
+func (s *SiteScanner) Check(url string, wg *sync.WaitGroup) {
 	defer wg.Done()
-	file, err := os.OpenFile("status.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 
-	if err != nil {
-		log.Fatal(err)
+	var response *http.Response
+	var err error
+
+	var i int8
+	for i = 0; i < s.AmountAttempts; i++ {
+		response, err = s.Client.Get(url)
+		if err != nil {
+			break
+		}
+		time.Sleep(time.Second * 2)
 	}
-	defer file.Close()
 
-	response, err := c.Get(url)
+	s.LogMutex.Lock()
+	defer s.LogMutex.Unlock()
+
 	if err != nil {
-		stre := "The" + url + "in nit responding" + "\n"
-		file.WriteString(stre)
+		fmt.Fprintf(s.ErrorLog, "Fail to access %s: %s\n", url, err)
 		return
 	}
 	defer response.Body.Close()
-
-	str := string(response.Status) + " " + url + "\n"
-
-	file.WriteString(str)
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	fmt.Fprintf(s.StatusLog, "[%s] %s %s\n", timestamp, url, response.Status)
 }
 
-func openListOfSites() []string {
+func (s *SiteScanner) Run() {
+	wg := &sync.WaitGroup{}
+
+	for _, str := range s.Sites {
+		wg.Add(1)
+		go s.Check(str, wg)
+	}
+
+	wg.Wait()
+}
+
+func openListOfSites() ([]string, error) {
 	sites, err := os.Open("ListOfSites.txt")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer sites.Close()
 
 	scanner := bufio.NewScanner(sites)
-
 	arrStr := []string{}
+
 	for scanner.Scan() {
-		arrStr = append(arrStr, string(scanner.Text()))
+		arrStr = append(arrStr, scanner.Text())
 	}
 
-	return arrStr
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return clean(arrStr), nil
 }
 
 func main() {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
-	wg := sync.WaitGroup{}
-	file, err := os.OpenFile("errors.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+
+	statusLog, err := os.OpenFile("status.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		log.Fatal("Failed to open log file:", err)
+		log.Fatal("Can not open status.log:", err)
 	}
-	log.SetOutput(file)
+	defer statusLog.Close()
 
-	data := clean(openListOfSites())
+	errorLog, err := os.OpenFile("errors.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatal("Can not open errors.log:", err)
+	}
+	defer errorLog.Close()
 
-	for _, str := range data {
-		wg.Add(1)
-		go getClientResponse(str, client, &wg)
+	sites, err := openListOfSites()
+	if err != nil {
+		log.Fatal("Can not open list of sites:", err)
 	}
 
-	wg.Wait()
+	siteScanner := &SiteScanner{
+		Client:         client,
+		Sites:          sites,
+		StatusLog:      statusLog,
+		ErrorLog:       errorLog,
+		AmountAttempts: 3,
+	}
 
+	siteScanner.Run()
 }
